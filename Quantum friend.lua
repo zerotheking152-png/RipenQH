@@ -8,6 +8,7 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local TweenService = game:GetService("TweenService")
 local VirtualInputManager = game:GetService("VirtualInputManager")
 local StarterGui = game:GetService("StarterGui")
+local CollectionService = game:GetService("CollectionService")
 
 local LocalPlayer = Players.LocalPlayer
 local Character = LocalPlayer.Character or LocalPlayer.CharacterAdded:Wait()
@@ -147,6 +148,26 @@ local function GetDamagedRaftParts()
     return damaged
 end
 
+local function HasRepairHammer()
+    local backpack = LocalPlayer:WaitForChild("Backpack")
+    local char = GetCharacter()
+    for _, tool in ipairs(backpack:GetChildren()) do
+        if tool:IsA("Tool") then
+            if tool.Name:lower():match("repair") or tool.Name:lower():match("hammer") or tool.Name:lower():match("fix") then
+                return tool
+            end
+        end
+    end
+    for _, tool in ipairs(char:GetChildren()) do
+        if tool:IsA("Tool") then
+            if tool.Name:lower():match("repair") or tool.Name:lower():match("hammer") or tool.Name:lower():match("fix") then
+                return tool
+            end
+        end
+    end
+    return nil
+end
+
 local function EquipTool(toolName)
     local char = GetCharacter()
     local backpack = LocalPlayer:WaitForChild("Backpack")
@@ -166,6 +187,9 @@ local function EquipTool(toolName)
     return false
 end
 
+local BroughtItems = {}
+local OriginalItemStates = {}
+
 local AutoBringItemEnabled = false
 local AutoBringItemRange = 50
 local function StartAutoBringItem()
@@ -177,18 +201,32 @@ local function StartAutoBringItem()
         for _, item in ipairs(items) do
             if item.Object and item.Object.Parent then
                 pcall(function()
+                    if not OriginalItemStates[item.Object] then
+                        OriginalItemStates[item.Object] = {
+                            CanCollide = item.Object.CanCollide,
+                            CFrame = item.Object.CFrame
+                        }
+                    end
                     if item.Object:IsA("BasePart") then
                         item.Object.CFrame = root.CFrame + Vector3.new(math.random(-3, 3), 0, math.random(-3, 3))
                         item.Object.CanCollide = false
                         item.Object.AssemblyLinearVelocity = Vector3.new(0, 0, 0)
                         item.Object.AssemblyAngularVelocity = Vector3.new(0, 0, 0)
+                        BroughtItems[item.Object] = true
                     elseif item.Object:IsA("Model") then
                         local primary = item.Object:FindFirstChildWhichIsA("BasePart")
                         if primary then
+                            if not OriginalItemStates[primary] then
+                                OriginalItemStates[primary] = {
+                                    CanCollide = primary.CanCollide,
+                                    CFrame = primary.CFrame
+                                }
+                            end
                             primary.CFrame = root.CFrame + Vector3.new(math.random(-3, 3), 0, math.random(-3, 3))
                             primary.CanCollide = false
                             primary.AssemblyLinearVelocity = Vector3.new(0, 0, 0)
                             primary.AssemblyAngularVelocity = Vector3.new(0, 0, 0)
+                            BroughtItems[primary] = true
                         end
                     end
                 end)
@@ -196,6 +234,23 @@ local function StartAutoBringItem()
             task.wait(0.05)
         end
     end))
+end
+
+local function RestoreItemCollisions()
+    for obj, wasBrought in pairs(BroughtItems) do
+        if wasBrought and obj and obj.Parent then
+            pcall(function()
+                local original = OriginalItemStates[obj]
+                if original then
+                    obj.CanCollide = original.CanCollide
+                else
+                    obj.CanCollide = true
+                end
+            end)
+        end
+    end
+    BroughtItems = {}
+    OriginalItemStates = {}
 end
 
 local KillAuraEnabled = false
@@ -267,6 +322,8 @@ end
 
 local InvisibleEnabled = false
 local OriginalTransparencies = {}
+local OriginalNameTags = {}
+
 local function SetInvisible(state)
     InvisibleEnabled = state
     local char = GetCharacter()
@@ -284,7 +341,7 @@ local function SetInvisible(state)
             elseif part:IsA("BillboardGui") or part:IsA("SurfaceGui") then
                 OriginalTransparencies[part] = part.Enabled
                 part.Enabled = false
-            elseif part:IsA("ParticleEmitter") or part:IsA("Trail") then
+            elseif part:IsA("ParticleEmitter") or part:IsA("Trail") or part:IsA("Beam") then
                 OriginalTransparencies[part] = part.Enabled
                 part.Enabled = false
             end
@@ -299,15 +356,16 @@ local function SetInvisible(state)
         end
         for _, player in ipairs(Players:GetPlayers()) do
             if player ~= LocalPlayer and player.Character then
-                local localScripts = player.Character:GetDescendants()
-                for _, obj in ipairs(localScripts) do
-                    if obj:IsA("LocalScript") and obj.Name:lower():match("name") then
-                        obj.Disabled = true
-                    end
+                local nameTag = player.Character:FindFirstChild("NameTag") or player.Character:FindFirstChild("Head") and player.Character.Head:FindFirstChild("NameTag")
+                if nameTag then
+                    OriginalNameTags[nameTag] = nameTag.Enabled
+                    nameTag.Enabled = false
                 end
             end
         end
-        StarterGui:SetCore("NameOcclusion", Enum.NameOcclusion.OccludeAll)
+        pcall(function()
+            StarterGui:SetCore("NameOcclusion", Enum.NameOcclusion.OccludeAll)
+        end)
     else
         for part, trans in pairs(OriginalTransparencies) do
             if part and part.Parent then
@@ -318,20 +376,21 @@ local function SetInvisible(state)
                     part.Transparency = trans
                 elseif part:IsA("BillboardGui") or part:IsA("SurfaceGui") then
                     part.Enabled = trans
-                elseif part:IsA("ParticleEmitter") or part:IsA("Trail") then
+                elseif part:IsA("ParticleEmitter") or part:IsA("Trail") or part:IsA("Beam") then
                     part.Enabled = trans
                 end
             end
         end
         OriginalTransparencies = {}
-        local head = char:FindFirstChild("Head")
-        if head then
-            local face = head:FindFirstChild("face")
-            if face then
-                face.Transparency = 0
+        for tag, enabled in pairs(OriginalNameTags) do
+            if tag and tag.Parent then
+                tag.Enabled = enabled
             end
         end
-        StarterGui:SetCore("NameOcclusion", Enum.NameOcclusion.NoOcclusion)
+        OriginalNameTags = {}
+        pcall(function()
+            StarterGui:SetCore("NameOcclusion", Enum.NameOcclusion.NoOcclusion)
+        end)
     end
 end
 
@@ -472,45 +531,63 @@ end
 
 local AutoRepairEnabled = false
 local AutoRepairRange = 50
+local RepairCooldown = false
 local function StartAutoRepair()
     AddConnection(RunService.Heartbeat:Connect(function()
         if not AutoRepairEnabled then return end
+        if RepairCooldown then return end
         local root = GetRootPart()
         if not root then return end
-        local hammerEquipped = EquipTool("repair hammer")
-        if not hammerEquipped then
-            hammerEquipped = EquipTool("hammer")
+        local hammer = HasRepairHammer()
+        if not hammer then return end
+        local hum = GetHumanoid()
+        if not hum then return end
+        local char = GetCharacter()
+        local hasEquipped = false
+        for _, tool in ipairs(char:GetChildren()) do
+            if tool:IsA("Tool") and (tool.Name:lower():match("repair") or tool.Name:lower():match("hammer") or tool.Name:lower():match("fix")) then
+                hasEquipped = true
+                break
+            end
         end
-        if not hammerEquipped then
-            hammerEquipped = EquipTool("repair")
+        if not hasEquipped then
+            pcall(function()
+                hum:EquipTool(hammer)
+            end)
+            task.wait(0.3)
         end
         local damaged = GetDamagedRaftParts()
-        for _, data in ipairs(damaged) do
-            if data.Part and data.Part.Parent then
-                local dist = (data.Part.Position - root.Position).Magnitude
-                if dist <= AutoRepairRange then
-                    pcall(function()
-                        root.CFrame = CFrame.new(data.Part.Position + Vector3.new(0, 5, 0))
-                        local remotes = ReplicatedStorage:GetDescendants()
-                        for _, remote in ipairs(remotes) do
-                            if remote:IsA("RemoteEvent") then
-                                if remote.Name:lower():match("repair") or remote.Name:lower():match("fix") or remote.Name:lower():match("heal") then
-                                    remote:FireServer(data.Part)
-                                end
+        if #damaged == 0 then return end
+        local target = damaged[1]
+        if target and target.Part and target.Part.Parent then
+            local dist = (target.Part.Position - root.Position).Magnitude
+            if dist <= AutoRepairRange then
+                RepairCooldown = true
+                pcall(function()
+                    local targetPos = target.Part.Position + Vector3.new(0, 3, 0)
+                    local lookAt = target.Part.Position
+                    root.CFrame = CFrame.new(targetPos, lookAt)
+                    task.wait(0.2)
+                    for _, tool in ipairs(char:GetChildren()) do
+                        if tool:IsA("Tool") then
+                            if tool.Name:lower():match("repair") or tool.Name:lower():match("hammer") or tool.Name:lower():match("fix") then
+                                tool:Activate()
+                                break
                             end
                         end
-                        local char = GetCharacter()
-                        for _, tool in ipairs(char:GetChildren()) do
-                            if tool:IsA("Tool") then
-                                if tool.Name:lower():match("repair") or tool.Name:lower():match("hammer") then
-                                    tool:Activate()
-                                end
+                    end
+                    local remotes = ReplicatedStorage:GetDescendants()
+                    for _, remote in ipairs(remotes) do
+                        if remote:IsA("RemoteEvent") then
+                            if remote.Name:lower():match("repair") or remote.Name:lower():match("fix") or remote.Name:lower():match("heal") or remote.Name:lower():match("hammer") then
+                                remote:FireServer(target.Part)
                             end
                         end
-                    end)
-                end
+                    end
+                end)
+                task.wait(0.5)
+                RepairCooldown = false
             end
-            task.wait(0.3)
         end
     end))
 end
@@ -518,50 +595,51 @@ end
 local AutoDupeEnabled = false
 local AutoDupeItem = "Wood"
 local AutoDupeAmount = 10
+local DupeCooldown = false
 local function StartAutoDupe()
     AddConnection(RunService.Heartbeat:Connect(function()
         if not AutoDupeEnabled then return end
+        if DupeCooldown then return end
+        DupeCooldown = true
         local root = GetRootPart()
         if not root then return end
         local backpack = LocalPlayer:WaitForChild("Backpack")
         local char = GetCharacter()
+        local foundItems = {}
         for _, item in ipairs(backpack:GetChildren()) do
             if item:IsA("Tool") or item:IsA("IntValue") or item:IsA("NumberValue") then
-                if item.Name:lower():match(AutoDupeItem:lower()) then
-                    pcall(function()
-                        local remotes = ReplicatedStorage:GetDescendants()
-                        for _, remote in ipairs(remotes) do
-                            if remote:IsA("RemoteEvent") then
-                                if remote.Name:lower():match("drop") or remote.Name:lower():match("give") or remote.Name:lower():match("trade") then
-                                    for i = 1, AutoDupeAmount do
-                                        remote:FireServer(item, root.CFrame)
-                                    end
-                                end
-                            end
-                        end
-                    end)
+                if item.Name:lower():match(AutoDupeItem:lower()) or AutoDupeItem == "All" then
+                    table.insert(foundItems, item)
                 end
             end
         end
         for _, item in ipairs(char:GetChildren()) do
             if item:IsA("Tool") then
-                if item.Name:lower():match(AutoDupeItem:lower()) then
-                    pcall(function()
-                        local remotes = ReplicatedStorage:GetDescendants()
-                        for _, remote in ipairs(remotes) do
-                            if remote:IsA("RemoteEvent") then
-                                if remote.Name:lower():match("drop") or remote.Name:lower():match("give") then
-                                    for i = 1, AutoDupeAmount do
-                                        remote:FireServer(item, root.CFrame)
-                                    end
-                                end
-                            end
-                        end
-                    end)
+                if item.Name:lower():match(AutoDupeItem:lower()) or AutoDupeItem == "All" then
+                    table.insert(foundItems, item)
                 end
             end
         end
+        if #foundItems == 0 then
+            DupeCooldown = false
+            return
+        end
+        pcall(function()
+            local remotes = ReplicatedStorage:GetDescendants()
+            for _, remote in ipairs(remotes) do
+                if remote:IsA("RemoteEvent") then
+                    if remote.Name:lower():match("drop") or remote.Name:lower():match("give") or remote.Name:lower():match("trade") or remote.Name:lower():match("dupe") or remote.Name:lower():match("clone") then
+                        for _, item in ipairs(foundItems) do
+                            for i = 1, math.min(AutoDupeAmount, 5) do
+                                remote:FireServer(item, root.CFrame)
+                            end
+                        end
+                    end
+                end
+            end
+        end)
         task.wait(1)
+        DupeCooldown = false
     end))
 end
 
@@ -762,6 +840,14 @@ MainTab:Toggle({
                 Duration = 3,
                 Icon = "check"
             })
+        else
+            RestoreItemCollisions()
+            Window:Notify({
+                Title = "Auto Bring Item",
+                Content = "Disabled! Item collisions restored.",
+                Duration = 3,
+                Icon = "check"
+            })
         end
     end
 })
@@ -904,6 +990,16 @@ MainTab:Toggle({
     Callback = function(state)
         AutoRepairEnabled = state
         if state then
+            local hammer = HasRepairHammer()
+            if not hammer then
+                Window:Notify({
+                    Title = "Auto Repair",
+                    Content = "No Repair Hammer found in inventory!",
+                    Duration = 5,
+                    Icon = "alert-triangle"
+                })
+                return
+            end
             StartAutoRepair()
             Window:Notify({
                 Title = "Auto Repair",
@@ -1229,7 +1325,7 @@ ESPTab:Toggle({
 })
 
 ESPTab:Section({
-    Name = "ESP Types",
+  Name = "ESP Types",
     Icon = "folder",
     Collapsed = true
 })
@@ -1357,6 +1453,7 @@ UtilityTab:Button({
         ESPPlayers = false
         FullBrightEnabled = false
         InvisibleEnabled = false
+        RestoreItemCollisions()
         SetInvisible(false)
         StopFly()
         ClearESP()
