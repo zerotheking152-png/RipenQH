@@ -8,7 +8,6 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local TweenService = game:GetService("TweenService")
 local VirtualInputManager = game:GetService("VirtualInputManager")
 local StarterGui = game:GetService("StarterGui")
-local CollectionService = game:GetService("CollectionService")
 
 local LocalPlayer = Players.LocalPlayer
 local Character = LocalPlayer.Character or LocalPlayer.CharacterAdded:Wait()
@@ -168,6 +167,27 @@ local function HasRepairHammer()
     return nil
 end
 
+local function GetInventoryItems()
+    local items = {}
+    local backpack = LocalPlayer:WaitForChild("Backpack")
+    local char = GetCharacter()
+    for _, item in ipairs(backpack:GetChildren()) do
+        if item:IsA("Tool") or item:IsA("IntValue") or item:IsA("NumberValue") then
+            if not table.find(items, item.Name) then
+                table.insert(items, item.Name)
+            end
+        end
+    end
+    for _, item in ipairs(char:GetChildren()) do
+        if item:IsA("Tool") then
+            if not table.find(items, item.Name) then
+                table.insert(items, item.Name)
+            end
+        end
+    end
+    return items
+end
+
 local function EquipTool(toolName)
     local char = GetCharacter()
     local backpack = LocalPlayer:WaitForChild("Backpack")
@@ -189,11 +209,36 @@ end
 
 local BroughtItems = {}
 local OriginalItemStates = {}
+local BringItemConnection = nil
 
 local AutoBringItemEnabled = false
 local AutoBringItemRange = 50
+
+local function RestoreItemCollisions()
+    for obj, _ in pairs(BroughtItems) do
+        if obj and obj.Parent then
+            pcall(function()
+                local original = OriginalItemStates[obj]
+                if original then
+                    obj.CanCollide = original.CanCollide
+                else
+                    obj.CanCollide = true
+                end
+                obj.AssemblyLinearVelocity = Vector3.new(0, 0, 0)
+                obj.AssemblyAngularVelocity = Vector3.new(0, 0, 0)
+            end)
+        end
+    end
+    BroughtItems = {}
+    OriginalItemStates = {}
+end
+
 local function StartAutoBringItem()
-    AddConnection(RunService.Heartbeat:Connect(function()
+    if BringItemConnection then
+        pcall(function() BringItemConnection:Disconnect() end)
+        BringItemConnection = nil
+    end
+    BringItemConnection = RunService.Heartbeat:Connect(function()
         if not AutoBringItemEnabled then return end
         local root = GetRootPart()
         if not root then return end
@@ -201,13 +246,12 @@ local function StartAutoBringItem()
         for _, item in ipairs(items) do
             if item.Object and item.Object.Parent then
                 pcall(function()
-                    if not OriginalItemStates[item.Object] then
-                        OriginalItemStates[item.Object] = {
-                            CanCollide = item.Object.CanCollide,
-                            CFrame = item.Object.CFrame
-                        }
-                    end
                     if item.Object:IsA("BasePart") then
+                        if not OriginalItemStates[item.Object] then
+                            OriginalItemStates[item.Object] = {
+                                CanCollide = item.Object.CanCollide
+                            }
+                        end
                         item.Object.CFrame = root.CFrame + Vector3.new(math.random(-3, 3), 0, math.random(-3, 3))
                         item.Object.CanCollide = false
                         item.Object.AssemblyLinearVelocity = Vector3.new(0, 0, 0)
@@ -218,8 +262,7 @@ local function StartAutoBringItem()
                         if primary then
                             if not OriginalItemStates[primary] then
                                 OriginalItemStates[primary] = {
-                                    CanCollide = primary.CanCollide,
-                                    CFrame = primary.CFrame
+                                    CanCollide = primary.CanCollide
                                 }
                             end
                             primary.CFrame = root.CFrame + Vector3.new(math.random(-3, 3), 0, math.random(-3, 3))
@@ -233,24 +276,16 @@ local function StartAutoBringItem()
             end
             task.wait(0.05)
         end
-    end))
+    end)
 end
 
-local function RestoreItemCollisions()
-    for obj, wasBrought in pairs(BroughtItems) do
-        if wasBrought and obj and obj.Parent then
-            pcall(function()
-                local original = OriginalItemStates[obj]
-                if original then
-                    obj.CanCollide = original.CanCollide
-                else
-                    obj.CanCollide = true
-                end
-            end)
-        end
+local function StopAutoBringItem()
+    AutoBringItemEnabled = false
+    if BringItemConnection then
+        pcall(function() BringItemConnection:Disconnect() end)
+        BringItemConnection = nil
     end
-    BroughtItems = {}
-    OriginalItemStates = {}
+    RestoreItemCollisions()
 end
 
 local KillAuraEnabled = false
@@ -497,7 +532,6 @@ end
 local AutoBuildEnabled = false
 local AutoBuildMaterial = "Wood"
 local AutoBuildDelay = 1
-local BuildPositions = {}
 local function StartAutoBuild()
     AddConnection(RunService.Heartbeat:Connect(function()
         if not AutoBuildEnabled then return end
@@ -593,34 +627,37 @@ local function StartAutoRepair()
 end
 
 local AutoDupeEnabled = false
-local AutoDupeItem = "Wood"
+local AutoDupeItem = ""
 local AutoDupeAmount = 10
 local DupeCooldown = false
+local DupeDropdownAPI = nil
+
 local function StartAutoDupe()
     AddConnection(RunService.Heartbeat:Connect(function()
         if not AutoDupeEnabled then return end
         if DupeCooldown then return end
+        if AutoDupeItem == "" or AutoDupeItem == "Select item" then return end
         DupeCooldown = true
         local root = GetRootPart()
         if not root then return end
         local backpack = LocalPlayer:WaitForChild("Backpack")
         local char = GetCharacter()
-        local foundItems = {}
+        local foundItem = nil
         for _, item in ipairs(backpack:GetChildren()) do
-            if item:IsA("Tool") or item:IsA("IntValue") or item:IsA("NumberValue") then
-                if item.Name:lower():match(AutoDupeItem:lower()) or AutoDupeItem == "All" then
-                    table.insert(foundItems, item)
+            if item:IsA("Tool") and item.Name == AutoDupeItem then
+                foundItem = item
+                break
+            end
+        end
+        if not foundItem then
+            for _, item in ipairs(char:GetChildren()) do
+                if item:IsA("Tool") and item.Name == AutoDupeItem then
+                    foundItem = item
+                    break
                 end
             end
         end
-        for _, item in ipairs(char:GetChildren()) do
-            if item:IsA("Tool") then
-                if item.Name:lower():match(AutoDupeItem:lower()) or AutoDupeItem == "All" then
-                    table.insert(foundItems, item)
-                end
-            end
-        end
-        if #foundItems == 0 then
+        if not foundItem then
             DupeCooldown = false
             return
         end
@@ -628,11 +665,9 @@ local function StartAutoDupe()
             local remotes = ReplicatedStorage:GetDescendants()
             for _, remote in ipairs(remotes) do
                 if remote:IsA("RemoteEvent") then
-                    if remote.Name:lower():match("drop") or remote.Name:lower():match("give") or remote.Name:lower():match("trade") or remote.Name:lower():match("dupe") or remote.Name:lower():match("clone") then
-                        for _, item in ipairs(foundItems) do
-                            for i = 1, math.min(AutoDupeAmount, 5) do
-                                remote:FireServer(item, root.CFrame)
-                            end
+                    if remote.Name:lower():match("drop") or remote.Name:lower():match("give") or remote.Name:lower():match("trade") or remote.Name:lower():match("dupe") or remote.Name:lower():match("clone") or remote.Name:lower():match("item") then
+                        for i = 1, math.min(AutoDupeAmount, 5) do
+                            remote:FireServer(foundItem, root.CFrame)
                         end
                     end
                 end
@@ -831,8 +866,8 @@ MainTab:Toggle({
     Desc = "Automatically bring nearby items to you (no clip)",
     Default = false,
     Callback = function(state)
-        AutoBringItemEnabled = state
         if state then
+            AutoBringItemEnabled = true
             StartAutoBringItem()
             Window:Notify({
                 Title = "Auto Bring Item",
@@ -841,7 +876,7 @@ MainTab:Toggle({
                 Icon = "check"
             })
         else
-            RestoreItemCollisions()
+            StopAutoBringItem()
             Window:Notify({
                 Title = "Auto Bring Item",
                 Content = "Disabled! Item collisions restored.",
@@ -1030,33 +1065,38 @@ MainTab:Section({
     Collapsed = true
 })
 
-MainTab:Toggle({
-    Name = "Auto Dupe",
-    Icon = "copy",
-    Desc = "Duplicate items in your inventory",
-    Default = false,
-    Callback = function(state)
-        AutoDupeEnabled = state
-        if state then
-            StartAutoDupe()
-            Window:Notify({
-                Title = "Auto Dupe",
-                Content = "Duplicating " .. AutoDupeItem .. " x" .. AutoDupeAmount,
-                Duration = 3,
-                Icon = "check"
-            })
+MainTab:Button({
+    Name = "Refresh Inventory",
+    Icon = "refresh-cw",
+    Desc = "Refresh inventory items list",
+    Callback = function()
+        local items = GetInventoryItems()
+        if #items == 0 then
+            items = {"No items found"}
         end
+        if DupeDropdownAPI then
+            DupeDropdownAPI:Refresh(items, items[1])
+        end
+        AutoDupeItem = items[1]
+        Window:Notify({
+            Title = "Inventory Refreshed",
+            Content = "Found " .. #items .. " items in inventory",
+            Duration = 3,
+            Icon = "check"
+        })
     end
 })
 
-MainTab:Dropdown({
+DupeDropdownAPI = MainTab:Dropdown({
     Name = "Dupe Item",
     Icon = "chevron-down",
-    Desc = "Select item to duplicate",
-    Options = {"Wood", "Metal", "Scrap", "Rope", "Stone", "Cloth", "Food", "All"},
-    Default = "Wood",
+    Desc = "Select item to duplicate from inventory",
+    Options = {"No items found"},
+    Default = "No items found",
     Callback = function(value)
-        AutoDupeItem = value
+        if value ~= "No items found" then
+            AutoDupeItem = value
+        end
     end
 })
 
@@ -1070,6 +1110,34 @@ MainTab:Slider({
     Increment = 1,
     Callback = function(value)
         AutoDupeAmount = value
+    end
+})
+
+MainTab:Toggle({
+    Name = "Auto Dupe",
+    Icon = "copy",
+    Desc = "Duplicate selected inventory item",
+    Default = false,
+    Callback = function(state)
+        AutoDupeEnabled = state
+        if state then
+            if AutoDupeItem == "" or AutoDupeItem == "No items found" then
+                Window:Notify({
+                    Title = "Auto Dupe",
+                    Content = "Please refresh inventory and select an item first!",
+                    Duration = 5,
+                    Icon = "alert-triangle"
+                })
+                return
+            end
+            StartAutoDupe()
+            Window:Notify({
+                Title = "Auto Dupe",
+                        Content = "Duplicating " .. AutoDupeItem .. " x" .. AutoDupeAmount,
+                Duration = 3,
+                Icon = "check"
+            })
+        end
     end
 })
 
@@ -1325,7 +1393,7 @@ ESPTab:Toggle({
 })
 
 ESPTab:Section({
-  Name = "ESP Types",
+    Name = "ESP Types",
     Icon = "folder",
     Collapsed = true
 })
@@ -1453,7 +1521,7 @@ UtilityTab:Button({
         ESPPlayers = false
         FullBrightEnabled = false
         InvisibleEnabled = false
-        RestoreItemCollisions()
+        StopAutoBringItem()
         SetInvisible(false)
         StopFly()
         ClearESP()
