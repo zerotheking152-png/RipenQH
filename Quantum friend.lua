@@ -7,11 +7,13 @@ local Workspace = game:GetService("Workspace")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local TweenService = game:GetService("TweenService")
 local VirtualInputManager = game:GetService("VirtualInputManager")
+local StarterGui = game:GetService("StarterGui")
 
 local LocalPlayer = Players.LocalPlayer
 local Character = LocalPlayer.Character or LocalPlayer.CharacterAdded:Wait()
 local Humanoid = Character:WaitForChild("Humanoid")
 local RootPart = Character:WaitForChild("HumanoidRootPart")
+local Backpack = LocalPlayer:WaitForChild("Backpack")
 
 local Connections = {}
 local function AddConnection(conn)
@@ -57,7 +59,7 @@ local function GetNearbyItems(range)
     if not root then return items end
     for _, obj in ipairs(Workspace:GetDescendants()) do
         if obj:IsA("BasePart") or obj:IsA("MeshPart") then
-            if obj.Name:lower():match("scrap") or obj.Name:lower():match("wood") or obj.Name:lower():match("metal") or obj.Name:lower():match("crate") or obj.Name:lower():match("item") or obj.Name:lower():match("loot") or obj.Name:lower():match("barrel") or obj.Name:lower():match("chest") then
+            if obj.Name:lower():match("scrap") or obj.Name:lower():match("wood") or obj.Name:lower():match("metal") or obj.Name:lower():match("crate") or obj.Name:lower():match("item") or obj.Name:lower():match("loot") or obj.Name:lower():match("barrel") or obj.Name:lower():match("chest") or obj.Name:lower():match("rope") or obj.Name:lower():match("stone") or obj.Name:lower():match("fiber") or obj.Name:lower():match("cloth") then
                 local dist = (obj.Position - root.Position).Magnitude
                 if dist <= range then
                     table.insert(items, {Object = obj, Distance = dist})
@@ -106,6 +108,64 @@ local function GetFish()
     return fish
 end
 
+local function GetMyRaft()
+    local root = GetRootPart()
+    if not root then return nil end
+    for _, obj in ipairs(Workspace:GetDescendants()) do
+        if obj:IsA("Model") then
+            if obj.Name:lower():match("raft") or obj.Name:lower():match("base") or obj.Name:lower():match("ship") then
+                local primary = obj:FindFirstChildWhichIsA("BasePart")
+                if primary then
+                    local dist = (primary.Position - root.Position).Magnitude
+                    if dist <= 100 then
+                        return obj
+                    end
+                end
+            end
+        end
+    end
+    return nil
+end
+
+local function GetDamagedRaftParts()
+    local damaged = {}
+    local myRaft = GetMyRaft()
+    if not myRaft then return damaged end
+    for _, part in ipairs(myRaft:GetDescendants()) do
+        if part:IsA("BasePart") or part:IsA("MeshPart") then
+            local health = part:FindFirstChild("Health") or part:FindFirstChild("HP")
+            local maxHealth = part:FindFirstChild("MaxHealth") or part:FindFirstChild("MaxHP")
+            if health and maxHealth then
+                if health.Value < maxHealth.Value then
+                    table.insert(damaged, {Part = part, Health = health.Value, MaxHealth = maxHealth.Value})
+                end
+            elseif part.Transparency < 1 then
+                table.insert(damaged, {Part = part, Health = 50, MaxHealth = 100})
+            end
+        end
+    end
+    return damaged
+end
+
+local function EquipTool(toolName)
+    local char = GetCharacter()
+    local backpack = LocalPlayer:WaitForChild("Backpack")
+    local hum = GetHumanoid()
+    if not hum then return false end
+    for _, tool in ipairs(backpack:GetChildren()) do
+        if tool:IsA("Tool") and tool.Name:lower():match(toolName:lower()) then
+            hum:EquipTool(tool)
+            return true
+        end
+    end
+    for _, tool in ipairs(char:GetChildren()) do
+        if tool:IsA("Tool") and tool.Name:lower():match(toolName:lower()) then
+            return true
+        end
+    end
+    return false
+end
+
 local AutoBringItemEnabled = false
 local AutoBringItemRange = 50
 local function StartAutoBringItem()
@@ -119,10 +179,16 @@ local function StartAutoBringItem()
                 pcall(function()
                     if item.Object:IsA("BasePart") then
                         item.Object.CFrame = root.CFrame + Vector3.new(math.random(-3, 3), 0, math.random(-3, 3))
+                        item.Object.CanCollide = false
+                        item.Object.AssemblyLinearVelocity = Vector3.new(0, 0, 0)
+                        item.Object.AssemblyAngularVelocity = Vector3.new(0, 0, 0)
                     elseif item.Object:IsA("Model") then
                         local primary = item.Object:FindFirstChildWhichIsA("BasePart")
                         if primary then
                             primary.CFrame = root.CFrame + Vector3.new(math.random(-3, 3), 0, math.random(-3, 3))
+                            primary.CanCollide = false
+                            primary.AssemblyLinearVelocity = Vector3.new(0, 0, 0)
+                            primary.AssemblyAngularVelocity = Vector3.new(0, 0, 0)
                         end
                     end
                 end)
@@ -169,6 +235,7 @@ local function StartAutoFarm()
                     pcall(function()
                         if item.Object:IsA("BasePart") then
                             item.Object.CFrame = root.CFrame
+                            item.Object.CanCollide = false
                         end
                     end)
                     break
@@ -199,18 +266,72 @@ local function StartAutoFarm()
 end
 
 local InvisibleEnabled = false
+local OriginalTransparencies = {}
 local function SetInvisible(state)
     InvisibleEnabled = state
     local char = GetCharacter()
     if not char then return end
-    for _, part in ipairs(char:GetDescendants()) do
-        if part:IsA("BasePart") or part:IsA("MeshPart") or part:IsA("Decal") or part:IsA("Texture") then
-            if state then
+    if state then
+        OriginalTransparencies = {}
+        for _, part in ipairs(char:GetDescendants()) do
+            if part:IsA("BasePart") or part:IsA("MeshPart") then
+                OriginalTransparencies[part] = part.Transparency
                 part.Transparency = 1
-            else
-                part.Transparency = 0
+                part.CastShadow = false
+            elseif part:IsA("Decal") or part:IsA("Texture") then
+                OriginalTransparencies[part] = part.Transparency
+                part.Transparency = 1
+            elseif part:IsA("BillboardGui") or part:IsA("SurfaceGui") then
+                OriginalTransparencies[part] = part.Enabled
+                part.Enabled = false
+            elseif part:IsA("ParticleEmitter") or part:IsA("Trail") then
+                OriginalTransparencies[part] = part.Enabled
+                part.Enabled = false
             end
         end
+        local head = char:FindFirstChild("Head")
+        if head then
+            local face = head:FindFirstChild("face")
+            if face then
+                OriginalTransparencies[face] = face.Transparency
+                face.Transparency = 1
+            end
+        end
+        for _, player in ipairs(Players:GetPlayers()) do
+            if player ~= LocalPlayer and player.Character then
+                local localScripts = player.Character:GetDescendants()
+                for _, obj in ipairs(localScripts) do
+                    if obj:IsA("LocalScript") and obj.Name:lower():match("name") then
+                        obj.Disabled = true
+                    end
+                end
+            end
+        end
+        StarterGui:SetCore("NameOcclusion", Enum.NameOcclusion.OccludeAll)
+    else
+        for part, trans in pairs(OriginalTransparencies) do
+            if part and part.Parent then
+                if part:IsA("BasePart") or part:IsA("MeshPart") then
+                    part.Transparency = trans
+                    part.CastShadow = true
+                elseif part:IsA("Decal") or part:IsA("Texture") then
+                    part.Transparency = trans
+                elseif part:IsA("BillboardGui") or part:IsA("SurfaceGui") then
+                    part.Enabled = trans
+                elseif part:IsA("ParticleEmitter") or part:IsA("Trail") then
+                    part.Enabled = trans
+                end
+            end
+        end
+        OriginalTransparencies = {}
+        local head = char:FindFirstChild("Head")
+        if head then
+            local face = head:FindFirstChild("face")
+            if face then
+                face.Transparency = 0
+            end
+        end
+        StarterGui:SetCore("NameOcclusion", Enum.NameOcclusion.NoOcclusion)
     end
 end
 
@@ -315,6 +436,9 @@ local function StartNoClip()
 end
 
 local AutoBuildEnabled = false
+local AutoBuildMaterial = "Wood"
+local AutoBuildDelay = 1
+local BuildPositions = {}
 local function StartAutoBuild()
     AddConnection(RunService.Heartbeat:Connect(function()
         if not AutoBuildEnabled then return end
@@ -322,29 +446,122 @@ local function StartAutoBuild()
         if not root then return end
         local remotes = ReplicatedStorage:GetDescendants()
         for _, remote in ipairs(remotes) do
-            if remote:IsA("RemoteEvent") and remote.Name:lower():match("build") then
-                pcall(function()
-                    remote:FireServer(root.CFrame + Vector3.new(0, 5, 0))
-                end)
+            if remote:IsA("RemoteEvent") then
+                if remote.Name:lower():match("build") or remote.Name:lower():match("place") then
+                    pcall(function()
+                        local pos = root.CFrame + Vector3.new(math.random(-10, 10), 5, math.random(-10, 10))
+                        remote:FireServer(pos, AutoBuildMaterial)
+                    end)
+                elseif remote.Name:lower():match("raft") and remote.Name:lower():match("add") then
+                    pcall(function()
+                        remote:FireServer(root.CFrame + Vector3.new(0, 5, 0), AutoBuildMaterial)
+                    end)
+                end
+            end
+            if remote:IsA("RemoteFunction") then
+                if remote.Name:lower():match("build") or remote.Name:lower():match("place") then
+                    pcall(function()
+                        remote:InvokeServer(root.CFrame + Vector3.new(math.random(-10, 10), 5, math.random(-10, 10)), AutoBuildMaterial)
+                    end)
+                end
             end
         end
+        task.wait(AutoBuildDelay)
     end))
 end
 
 local AutoRepairEnabled = false
+local AutoRepairRange = 50
 local function StartAutoRepair()
     AddConnection(RunService.Heartbeat:Connect(function()
         if not AutoRepairEnabled then return end
         local root = GetRootPart()
         if not root then return end
-        for _, obj in ipairs(Workspace:GetDescendants()) do
-            if obj:IsA("Model") and obj.Name:lower():match("raft") then
-                for _, part in ipairs(obj:GetDescendants()) do
-                    if part:IsA("BasePart") then
-                    end
+        local hammerEquipped = EquipTool("repair hammer")
+        if not hammerEquipped then
+            hammerEquipped = EquipTool("hammer")
+        end
+        if not hammerEquipped then
+            hammerEquipped = EquipTool("repair")
+        end
+        local damaged = GetDamagedRaftParts()
+        for _, data in ipairs(damaged) do
+            if data.Part and data.Part.Parent then
+                local dist = (data.Part.Position - root.Position).Magnitude
+                if dist <= AutoRepairRange then
+                    pcall(function()
+                        root.CFrame = CFrame.new(data.Part.Position + Vector3.new(0, 5, 0))
+                        local remotes = ReplicatedStorage:GetDescendants()
+                        for _, remote in ipairs(remotes) do
+                            if remote:IsA("RemoteEvent") then
+                                if remote.Name:lower():match("repair") or remote.Name:lower():match("fix") or remote.Name:lower():match("heal") then
+                                    remote:FireServer(data.Part)
+                                end
+                            end
+                        end
+                        local char = GetCharacter()
+                        for _, tool in ipairs(char:GetChildren()) do
+                            if tool:IsA("Tool") then
+                                if tool.Name:lower():match("repair") or tool.Name:lower():match("hammer") then
+                                    tool:Activate()
+                                end
+                            end
+                        end
+                    end)
+                end
+            end
+            task.wait(0.3)
+        end
+    end))
+end
+
+local AutoDupeEnabled = false
+local AutoDupeItem = "Wood"
+local AutoDupeAmount = 10
+local function StartAutoDupe()
+    AddConnection(RunService.Heartbeat:Connect(function()
+        if not AutoDupeEnabled then return end
+        local root = GetRootPart()
+        if not root then return end
+        local backpack = LocalPlayer:WaitForChild("Backpack")
+        local char = GetCharacter()
+        for _, item in ipairs(backpack:GetChildren()) do
+            if item:IsA("Tool") or item:IsA("IntValue") or item:IsA("NumberValue") then
+                if item.Name:lower():match(AutoDupeItem:lower()) then
+                    pcall(function()
+                        local remotes = ReplicatedStorage:GetDescendants()
+                        for _, remote in ipairs(remotes) do
+                            if remote:IsA("RemoteEvent") then
+                                if remote.Name:lower():match("drop") or remote.Name:lower():match("give") or remote.Name:lower():match("trade") then
+                                    for i = 1, AutoDupeAmount do
+                                        remote:FireServer(item, root.CFrame)
+                                    end
+                                end
+                            end
+                        end
+                    end)
                 end
             end
         end
+        for _, item in ipairs(char:GetChildren()) do
+            if item:IsA("Tool") then
+                if item.Name:lower():match(AutoDupeItem:lower()) then
+                    pcall(function()
+                        local remotes = ReplicatedStorage:GetDescendants()
+                        for _, remote in ipairs(remotes) do
+                            if remote:IsA("RemoteEvent") then
+                                if remote.Name:lower():match("drop") or remote.Name:lower():match("give") then
+                                    for i = 1, AutoDupeAmount do
+                                        remote:FireServer(item, root.CFrame)
+                                    end
+                                end
+                            end
+                        end
+                    end)
+                end
+            end
+        end
+        task.wait(1)
     end))
 end
 
@@ -450,6 +667,7 @@ LocalPlayer.CharacterAdded:Connect(function(char)
     Character = char
     Humanoid = char:WaitForChild("Humanoid")
     RootPart = char:WaitForChild("HumanoidRootPart")
+    Backpack = LocalPlayer:WaitForChild("Backpack")
     if SpeedHackEnabled then
         task.wait(0.5)
         UpdateSpeed()
@@ -457,6 +675,10 @@ LocalPlayer.CharacterAdded:Connect(function(char)
     if JumpPowerEnabled then
         task.wait(0.5)
         UpdateJumpPower()
+    end
+    if InvisibleEnabled then
+        task.wait(0.5)
+        SetInvisible(true)
     end
 end)
 
@@ -483,7 +705,7 @@ local InfoTab = Window:CreateTab({
 InfoTab:Section({
     Name = "About",
     Icon = "folder",
-    Collapsed = false
+    Collapsed = true
 })
 
 InfoTab:Paragraph({
@@ -520,15 +742,15 @@ local MainTab = Window:CreateTab({
 })
 
 MainTab:Section({
-    Name = "Auto Features",
+    Name = "Auto Bring",
     Icon = "folder",
-    Collapsed = false
+    Collapsed = true
 })
 
 MainTab:Toggle({
     Name = "Auto Bring Item",
     Icon = "box",
-    Desc = "Automatically bring nearby items to you",
+    Desc = "Automatically bring nearby items to you (no clip)",
     Default = false,
     Callback = function(state)
         AutoBringItemEnabled = state
@@ -542,6 +764,25 @@ MainTab:Toggle({
             })
         end
     end
+})
+
+MainTab:Slider({
+    Name = "Bring Range",
+    Icon = "target",
+    Desc = "Set the range for bringing items",
+    Min = 10,
+    Max = 200,
+    Default = 50,
+    Increment = 10,
+    Callback = function(value)
+        AutoBringItemRange = value
+    end
+})
+
+MainTab:Section({
+    Name = "Auto Farm",
+    Icon = "folder",
+    Collapsed = true
 })
 
 MainTab:Toggle({
@@ -574,6 +815,25 @@ MainTab:Dropdown({
     end
 })
 
+MainTab:Slider({
+    Name = "Farm Speed",
+    Icon = "sliders",
+    Desc = "Set farm teleport range",
+    Min = 10,
+    Max = 200,
+    Default = 50,
+    Increment = 10,
+    Callback = function(value)
+        AutoFarmSpeed = value
+    end
+})
+
+MainTab:Section({
+    Name = "Auto Fish",
+    Icon = "folder",
+    Collapsed = true
+})
+
 MainTab:Toggle({
     Name = "Auto Fish",
     Icon = "fish",
@@ -585,6 +845,12 @@ MainTab:Toggle({
             StartAutoFish()
         end
     end
+})
+
+MainTab:Section({
+    Name = "Auto Build",
+    Icon = "folder",
+    Collapsed = true
 })
 
 MainTab:Toggle({
@@ -600,16 +866,114 @@ MainTab:Toggle({
     end
 })
 
+MainTab:Dropdown({
+    Name = "Build Material",
+    Icon = "chevron-down",
+    Desc = "Select build material",
+    Options = {"Wood", "Metal", "Scrap", "Rope"},
+    Default = "Wood",
+    Callback = function(value)
+        AutoBuildMaterial = value
+    end
+})
+
+MainTab:Slider({
+    Name = "Build Delay",
+    Icon = "clock",
+    Desc = "Delay between builds",
+    Min = 0.1,
+    Max = 5,
+    Default = 1,
+    Increment = 0.1,
+    Callback = function(value)
+        AutoBuildDelay = value
+    end
+})
+
+MainTab:Section({
+    Name = "Auto Repair",
+    Icon = "folder",
+    Collapsed = true
+})
+
 MainTab:Toggle({
     Name = "Auto Repair",
     Icon = "wrench",
-    Desc = "Automatically repair damaged raft parts",
+    Desc = "Auto equip repair hammer and fix your raft",
     Default = false,
     Callback = function(state)
         AutoRepairEnabled = state
         if state then
             StartAutoRepair()
+            Window:Notify({
+                Title = "Auto Repair",
+                Content = "Will auto equip hammer and repair your raft!",
+                Duration = 3,
+                Icon = "check"
+            })
         end
+    end
+})
+
+MainTab:Slider({
+    Name = "Repair Range",
+    Icon = "target",
+    Desc = "Range to detect damaged parts",
+    Min = 10,
+    Max = 100,
+    Default = 50,
+    Increment = 5,
+    Callback = function(value)
+        AutoRepairRange = value
+    end
+})
+
+MainTab:Section({
+    Name = "Auto Dupe",
+    Icon = "folder",
+    Collapsed = true
+})
+
+MainTab:Toggle({
+    Name = "Auto Dupe",
+    Icon = "copy",
+    Desc = "Duplicate items in your inventory",
+    Default = false,
+    Callback = function(state)
+        AutoDupeEnabled = state
+        if state then
+            StartAutoDupe()
+            Window:Notify({
+                Title = "Auto Dupe",
+                Content = "Duplicating " .. AutoDupeItem .. " x" .. AutoDupeAmount,
+                Duration = 3,
+                Icon = "check"
+            })
+        end
+    end
+})
+
+MainTab:Dropdown({
+    Name = "Dupe Item",
+    Icon = "chevron-down",
+    Desc = "Select item to duplicate",
+    Options = {"Wood", "Metal", "Scrap", "Rope", "Stone", "Cloth", "Food", "All"},
+    Default = "Wood",
+    Callback = function(value)
+        AutoDupeItem = value
+    end
+})
+
+MainTab:Slider({
+    Name = "Dupe Amount",
+    Icon = "hash",
+    Desc = "Amount to duplicate per cycle",
+    Min = 1,
+    Max = 50,
+    Default = 10,
+    Increment = 1,
+    Callback = function(value)
+        AutoDupeAmount = value
     end
 })
 
@@ -619,9 +983,9 @@ local CombatTab = Window:CreateTab({
 })
 
 CombatTab:Section({
-    Name = "Combat Features",
+    Name = "Kill Aura",
     Icon = "folder",
-    Collapsed = false
+    Collapsed = true
 })
 
 CombatTab:Toggle({
@@ -644,7 +1008,7 @@ CombatTab:Toggle({
 })
 
 CombatTab:Slider({
-    Name = "Kill Aura Range",
+    Name = "Aura Range",
     Icon = "target",
     Desc = "Set the range for kill aura",
     Min = 10,
@@ -657,20 +1021,7 @@ CombatTab:Slider({
 })
 
 CombatTab:Slider({
-    Name = "Kill Aura Range",
-    Icon = "target",
-    Desc = "Set the range for kill aura",
-    Min = 10,
-    Max = 100,
-    Default = 30,
-    Increment = 5,
-    Callback = function(value)
-        KillAuraRange = value
-    end
-})
-
-CombatTab:Slider({
-    Name = "Kill Aura Damage",
+    Name = "Aura Damage",
     Icon = "bar-chart-2",
     Desc = "Set damage per tick",
     Min = 10,
@@ -680,6 +1031,12 @@ CombatTab:Slider({
     Callback = function(value)
         KillAuraDamage = value
     end
+})
+
+CombatTab:Section({
+    Name = "God Mode",
+    Icon = "folder",
+    Collapsed = true
 })
 
 CombatTab:Toggle({
@@ -695,10 +1052,16 @@ CombatTab:Toggle({
     end
 })
 
+CombatTab:Section({
+    Name = "Invisible",
+    Icon = "folder",
+    Collapsed = true
+})
+
 CombatTab:Toggle({
     Name = "Invisible",
     Icon = "eye-off",
-    Desc = "Makes your character invisible",
+    Desc = "Makes your character invisible to everyone",
     Default = false,
     Callback = function(state)
         SetInvisible(state)
@@ -711,9 +1074,9 @@ local MovementTab = Window:CreateTab({
 })
 
 MovementTab:Section({
-    Name = "Movement Hacks",
+    Name = "Speed",
     Icon = "folder",
-    Collapsed = false
+    Collapsed = true
 })
 
 MovementTab:Toggle({
@@ -741,6 +1104,12 @@ MovementTab:Slider({
             UpdateSpeed()
         end
     end
+})
+
+MovementTab:Section({
+    Name = "Jump",
+    Icon = "folder",
+    Collapsed = true
 })
 
 MovementTab:Toggle({
@@ -771,6 +1140,22 @@ MovementTab:Slider({
 })
 
 MovementTab:Toggle({
+    Name = "Infinite Jump",
+    Icon = "arrow-up",
+    Desc = "Jump infinitely in the air",
+    Default = false,
+    Callback = function(state)
+        InfiniteJumpEnabled = state
+    end
+})
+
+MovementTab:Section({
+    Name = "Fly",
+    Icon = "folder",
+    Collapsed = true
+})
+
+MovementTab:Toggle({
     Name = "Fly",
     Icon = "cloud",
     Desc = "Enable flying mode",
@@ -798,6 +1183,12 @@ MovementTab:Slider({
     end
 })
 
+MovementTab:Section({
+    Name = "No Clip",
+    Icon = "folder",
+    Collapsed = true
+})
+
 MovementTab:Toggle({
     Name = "No Clip",
     Icon = "ghost",
@@ -811,25 +1202,15 @@ MovementTab:Toggle({
     end
 })
 
-MovementTab:Toggle({
-    Name = "Infinite Jump",
-    Icon = "arrow-up",
-    Desc = "Jump infinitely in the air",
-    Default = false,
-    Callback = function(state)
-        InfiniteJumpEnabled = state
-    end
-})
-
 local ESPTab = Window:CreateTab({
     Name = "ESP",
     Icon = "eye"
 })
 
 ESPTab:Section({
-    Name = "ESP Settings",
+    Name = "ESP Toggle",
     Icon = "folder",
-    Collapsed = false
+    Collapsed = true
 })
 
 ESPTab:Toggle({
@@ -845,6 +1226,12 @@ ESPTab:Toggle({
             ClearESP()
         end
     end
+})
+
+ESPTab:Section({
+    Name = "ESP Types",
+    Icon = "folder",
+    Collapsed = true
 })
 
 ESPTab:Toggle({
@@ -883,9 +1270,9 @@ local UtilityTab = Window:CreateTab({
 })
 
 UtilityTab:Section({
-    Name = "Utility Features",
+    Name = "Anti AFK",
     Icon = "folder",
-    Collapsed = false
+    Collapsed = true
 })
 
 UtilityTab:Toggle({
@@ -906,6 +1293,12 @@ UtilityTab:Toggle({
     end
 })
 
+UtilityTab:Section({
+    Name = "Full Bright",
+    Icon = "folder",
+    Collapsed = true
+})
+
 UtilityTab:Toggle({
     Name = "Full Bright",
     Icon = "sun",
@@ -914,6 +1307,12 @@ UtilityTab:Toggle({
     Callback = function(state)
         SetFullBright(state)
     end
+})
+
+UtilityTab:Section({
+    Name = "Character",
+    Icon = "folder",
+    Collapsed = true
 })
 
 UtilityTab:Button({
@@ -928,6 +1327,12 @@ UtilityTab:Button({
     end
 })
 
+UtilityTab:Section({
+    Name = "Clear All",
+    Icon = "folder",
+    Collapsed = true
+})
+
 UtilityTab:Button({
     Name = "Clear All Effects",
     Icon = "trash",
@@ -938,6 +1343,7 @@ UtilityTab:Button({
         AutoFishEnabled = false
         AutoBuildEnabled = false
         AutoRepairEnabled = false
+        AutoDupeEnabled = false
         KillAuraEnabled = false
         GodModeEnabled = false
         SpeedHackEnabled = false
@@ -973,13 +1379,13 @@ local SettingsTab = Window:CreateTab({
 })
 
 SettingsTab:Section({
-    Name = "UI Settings",
+    Name = "Theme",
     Icon = "folder",
-    Collapsed = false
+    Collapsed = true
 })
 
 SettingsTab:Dropdown({
-    Name = "Theme",
+    Name = "UI Theme",
     Icon = "palette",
     Desc = "Change the UI theme",
     Options = {"QuantumDark", "Dark", "Light", "Ocean", "Midnight", "Forest"},
@@ -989,6 +1395,12 @@ SettingsTab:Dropdown({
     end
 })
 
+SettingsTab:Section({
+    Name = "Keybind",
+    Icon = "folder",
+    Collapsed = true
+})
+
 SettingsTab:Keybind({
     Name = "Toggle Key",
     Icon = "key",
@@ -996,6 +1408,12 @@ SettingsTab:Keybind({
     Default = Enum.KeyCode.RightShift,
     Callback = function(key)
     end
+})
+
+SettingsTab:Section({
+    Name = "Config",
+    Icon = "folder",
+    Collapsed = true
 })
 
 SettingsTab:Button({
@@ -1028,7 +1446,11 @@ SettingsTab:Button({
     end
 })
 
-SettingsTab:Divider()
+SettingsTab:Section({
+    Name = "Credits",
+    Icon = "folder",
+    Collapsed = true
+})
 
 SettingsTab:Paragraph({
     Title = "Credits",
